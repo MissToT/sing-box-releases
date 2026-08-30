@@ -1,32 +1,32 @@
 name: Publish sing-box build
 
 on:
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: 'Release channel'
-        required: true
-        type: choice
-        options:
-          - testing
-          - stable
-        default: testing
-      build_run_id:
-        description: 'Successful build workflow run ID'
-        required: true
-        type: string
-      publish_release:
-        description: 'Publish type'
-        required: true
-        type: choice
-        options:
-          - pre-release
-          - release
-        default: pre-release
-      update_sing_box:
-        description: 'Force-update the sing-box tag and channel branch'
-        required: false
-        type: boolean
+  workflow_dispatch:  
+    inputs:  
+      channel:  
+        description: '发布渠道'  
+        required: true  
+        type: choice  
+        options:  
+          - testing  
+          - stable  
+        default: testing  
+      build_run_id:  
+        description: '成功完成的 build workflow 运行 ID'  
+        required: true  
+        type: string  
+      publish_release:  
+        description: '发布类型'  
+        required: true  
+        type: choice  
+        options:  
+          - pre-release  
+          - release  
+        default: pre-release  
+      update_sing_box:  
+        description: '强制更新 sing-box 的 tag 和渠道分支'  
+        required: false  
+        type: boolean  
         default: false
 
 concurrency:
@@ -144,12 +144,7 @@ jobs:
               and (.version | test("^[0-9A-Za-z][0-9A-Za-z.+-]*$"))
               and (.source_sha | test("^[0-9a-f]{40}$"))
               and (.built_at | type == "string" and length > 0)
-              and (.build.cli | type == "boolean")
-              and (.build.android_gui | type == "boolean")
-              and (.build.windows_gui | type == "boolean")
-              and (.build.linux_gui | type == "boolean")
-              and ($channel == "testing" or
-                (.build.windows_gui == false and .build.linux_gui == false))
+              and (.build.cli | type == "boolean")  
               and (.artifacts | type == "array" and length > 0)
               and ((.artifacts | map(.path) | unique | length) == (.artifacts | length))
               and all(.artifacts[];
@@ -165,9 +160,6 @@ jobs:
             echo "source_sha=$(jq -r '.source_sha' "$manifest")"
             echo "built_at=$(jq -r '.built_at' "$manifest")"
             echo "build_cli=$(jq -r '.build.cli' "$manifest")"
-            echo "build_android_gui=$(jq -r '.build.android_gui' "$manifest")"
-            echo "build_windows_gui=$(jq -r '.build.windows_gui' "$manifest")"
-            echo "build_linux_gui=$(jq -r '.build.linux_gui' "$manifest")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Download CLI artifacts
@@ -175,39 +167,6 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: binary-*
-          path: artifacts
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.build_run_id }}
-
-      - name: Download Android artifacts
-        if: steps.manifest.outputs.build_android_gui == 'true'
-        uses: actions/download-artifact@v8
-        with:
-          pattern: android-apk-*
-          path: artifacts
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.build_run_id }}
-
-      - name: Download Windows GUI artifacts
-        if: inputs.channel == 'testing' && steps.manifest.outputs.build_windows_gui == 'true'
-        uses: actions/download-artifact@v8
-        with:
-          pattern: windows-gui-*
-          path: artifacts
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.build_run_id }}
-
-      - name: Download Linux GUI artifacts
-        if: inputs.channel == 'testing' && steps.manifest.outputs.build_linux_gui == 'true'
-        uses: actions/download-artifact@v8
-        with:
-          pattern: linux-gui-*
           path: artifacts
           merge-multiple: true
           github-token: ${{ github.token }}
@@ -241,7 +200,7 @@ jobs:
           SING_BOX_REPOSITORY_TOKEN: ${{ secrets.SING_BOX_REPOSITORY_TOKEN }}
         run: |
           if [[ -z "$SING_BOX_REPOSITORY_TOKEN" ]]; then
-            echo "SING_BOX_REPOSITORY_TOKEN is required to update reF1nd/sing-box" >&2
+            echo "SING_BOX_REPOSITORY_TOKEN is required to update MissToT/sing-box" >&2
             exit 1
           fi
 
@@ -249,7 +208,7 @@ jobs:
         if: inputs.update_sing_box
         uses: actions/checkout@v6
         with:
-          repository: reF1nd/sing-box
+          repository: MissToT/sing-box
           ref: ${{ steps.manifest.outputs.source_sha }}
           token: ${{ secrets.SING_BOX_REPOSITORY_TOKEN }}
           path: sing-box
@@ -309,7 +268,7 @@ jobs:
             echo "|---|---|"
             echo "| Channel | \`${CHANNEL}\` |"
             echo "| Version | \`${VERSION}\` |"
-            echo "| sing-box Commit | [\`${SOURCE_SHA}\`](https://github.com/reF1nd/sing-box/commit/${SOURCE_SHA}) |"
+            echo "| sing-box Commit | [\`${SOURCE_SHA}\`](https://github.com/MissToT/sing-box/commit/${SOURCE_SHA}) |"
             echo "| Built At | ${BUILT_AT} |"
             echo "| Published At | ${published_at} |"
             echo "| Build Run ID | [${BUILD_RUN_ID}](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN_ID}) |"
@@ -364,58 +323,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Organize release files
-        run: |
-          mkdir -p release_files/sfa release_files/sfw release_files/sfl release_files/android release_files/darwin release_files/windows release_files/others
-          mv release_files/SFA-*.apk release_files/sfa/ 2>/dev/null || true
-          mv release_files/SFW-*.exe release_files/sfw/ 2>/dev/null || true
-          mv release_files/SFL-* release_files/sfl/ 2>/dev/null || true
-          mv release_files/sing-box-*-android-* release_files/android/ 2>/dev/null || true
-          mv release_files/sing-box-*-darwin-* release_files/darwin/ 2>/dev/null || true
-          mv release_files/sing-box-*-windows-* release_files/windows/ 2>/dev/null || true
+      - name: Organize release files  
+        run: |  
+          mkdir -p release_files/android release_files/darwin release_files/windows release_files/others  
+          mv release_files/sing-box-*-android-* release_files/android/ 2>/dev/null || true  
+          mv release_files/sing-box-*-darwin-* release_files/darwin/ 2>/dev/null || true  
+          mv release_files/sing-box-*-windows-* release_files/windows/ 2>/dev/null || true  
           mv release_files/sing-box-* release_files/others/ 2>/dev/null || true
-
-      - name: Post SFA to channel
-        if: steps.manifest.outputs.build_android_gui == 'true'
-        uses: xireiki/channel-post@v2
-        with:
-          chat_id: ${{ secrets.CHAT_ID }}
-          bot_token: ${{ secrets.BOT_TOKEN }}
-          path: release_files/sfa/*
-          context: "#${{ inputs.channel }}\nSFA-${{ steps.manifest.outputs.version }}"
-          parse_mode: HTML
-          large_file: true
-          api_id: ${{ secrets.API_ID }}
-          api_hash: ${{ secrets.API_HASH }}
-          method: sendFile
-
-      - name: Post SFW to channel
-        if: inputs.channel == 'testing' && steps.manifest.outputs.build_windows_gui == 'true'
-        uses: xireiki/channel-post@v2
-        with:
-          chat_id: ${{ secrets.CHAT_ID }}
-          bot_token: ${{ secrets.BOT_TOKEN }}
-          path: release_files/sfw/*
-          context: "#${{ inputs.channel }}\nSFW-${{ steps.manifest.outputs.version }}"
-          parse_mode: HTML
-          large_file: true
-          api_id: ${{ secrets.API_ID }}
-          api_hash: ${{ secrets.API_HASH }}
-          method: sendFile
-
-      - name: Post SFL to channel
-        if: inputs.channel == 'testing' && steps.manifest.outputs.build_linux_gui == 'true'
-        uses: xireiki/channel-post@v2
-        with:
-          chat_id: ${{ secrets.CHAT_ID }}
-          bot_token: ${{ secrets.BOT_TOKEN }}
-          path: release_files/sfl/*
-          context: "#${{ inputs.channel }}\nSFL-${{ steps.manifest.outputs.version }}"
-          parse_mode: HTML
-          large_file: true
-          api_id: ${{ secrets.API_ID }}
-          api_hash: ${{ secrets.API_HASH }}
-          method: sendFile
 
       - name: Post sing-box Android CLI to channel
         if: steps.manifest.outputs.build_cli == 'true'
