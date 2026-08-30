@@ -1,34 +1,33 @@
-name: Build sing-box oldstable (Android, Windows, Linux, Darwin)
+name: Build sing-box oldstable
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag or temporary tag when building from commit hash (e.g. 1.13.0-rc.4)'
-        required: true
-      commit_hash:
-        description: 'Optional commit hash to build from (overrides version tag)'
-        required: false
+  workflow_dispatch:  
+    inputs:  
+      version:  
+        description: '版本号或从 commit hash 构建时的临时标签 (例如 1.13.0-rc.4)'  
+        required: true  
+      commit_hash:  
+        description: '可选的 commit hash，指定后将覆盖 version 版本标签'  
+        required: false  
+        default: ''  
+      publish_release:  
+        description: '构建完成后的发布类型'  
+        required: false  
+        type: choice  
+        options:  
+          - none  
+          - pre-release  
+          - release  
+        default: none  
+      build_cli:  
+        description: '构建 CLI'  
+        required: false  
+        type: boolean  
+        default: true  
+      custom_tags:  
+        description: '自定义编译 tags（同时应用于 CLI 和 SFA 构建），使用英文逗号分隔。留空则使用默认的 TAGS_COMMON + TAGS_CLI_EXTRA / TAGS_SFA_EXTRA'  
+        required: false  
         default: ''
-      publish_release:
-        description: 'Publish type after build'
-        required: false
-        type: choice
-        options:
-          - none
-          - pre-release
-          - release
-        default: none
-      build_cli:
-        description: 'Build CLI'
-        required: false
-        type: boolean
-        default: true
-      build_android_gui:
-        description: 'Build Android'
-        required: false
-        type: boolean
-        default: true
 
 env:
   GO_VERSION: '~1.25.8'
@@ -44,144 +43,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: linux
-            arch: arm64
-            os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            goamd64: ''
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-linux-arm64
-          - platform: linux
-            arch: amd64
-            os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            goamd64: v1
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-linux-amd64
-          - platform: linux
-            arch: amd64v3
-            os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            goamd64: v3
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-linux-amd64v3
-          - platform: windows
-            arch: arm64
-            os: windows-latest
-            goos: windows
-            goarch: arm64
-            goamd64: ''
-            binary: sing-box.exe
-            extra_tags: ''
-            artifact_name: binary-windows-arm64
-          - platform: windows
-            arch: amd64
-            os: windows-latest
-            goos: windows
-            goarch: amd64
-            goamd64: v1
-            binary: sing-box.exe
-            extra_tags: ''
-            artifact_name: binary-windows-amd64
-          - platform: windows
-            arch: amd64v3
-            os: windows-latest
-            goos: windows
-            goarch: amd64
-            goamd64: v3
-            binary: sing-box.exe
-            extra_tags: ''
-            artifact_name: binary-windows-amd64v3
-          - platform: darwin
-            arch: arm64
-            os: macos-latest
-            goos: darwin
-            goarch: arm64
-            goamd64: ''
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-darwin-arm64
-          - platform: darwin
-            arch: amd64
-            os: macos-latest
-            goos: darwin
-            goarch: amd64
-            goamd64: v1
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-darwin-amd64
-          - platform: darwin
-            arch: amd64v3
-            os: macos-latest
-            goos: darwin
-            goarch: amd64
-            goamd64: v3
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-darwin-amd64v3
-            cgo: '0'
-            cc_triple: ''
-          - platform: android
-            arch: 386
-            os: ubuntu-latest
-            goos: android
-            goarch: 386
-            goamd64: ''
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-android-386
-            cgo: '1'
-            cc_triple: 'i686-linux-android21'
-          - platform: android
-            arch: amd64
-            os: ubuntu-latest
-            goos: android
-            goarch: amd64
-            goamd64: v1
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-android-amd64
-            cgo: '1'
-            cc_triple: 'x86_64-linux-android21'
-          - platform: android
-            arch: amd64v3
-            os: ubuntu-latest
-            goos: android
-            goarch: amd64
-            goamd64: v3
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-android-amd64v3
-            cgo: '1'
-            cc_triple: 'x86_64-linux-android21'
-          - platform: android
-            arch: arm
-            os: ubuntu-latest
-            goos: android
-            goarch: arm
-            goamd64: ''
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-android-arm
-            cgo: '1'
-            cc_triple: 'armv7a-linux-androideabi21'
-          - platform: android
-            arch: arm64
-            os: ubuntu-latest
-            goos: android
-            goarch: arm64
-            goamd64: ''
-            binary: sing-box
-            extra_tags: ''
-            artifact_name: binary-android-arm64
-            cgo: '1'
+        include:  
+          - platform: windows  
+            arch: amd64  
+            os: windows-latest  
+            goos: windows  
+            goarch: amd64  
+            goamd64: v1  
+            binary: sing-box.exe  
+            extra_tags: ''  
+            artifact_name: binary-windows-amd64  
+          - platform: windows  
+            arch: amd64v3  
+            os: windows-latest  
+            goos: windows  
+            goarch: amd64  
+            goamd64: v3  
+            binary: sing-box.exe  
+            extra_tags: ''  
+            artifact_name: binary-windows-amd64v3  
+          - platform: android  
+            arch: arm64  
+            os: ubuntu-latest  
+            goos: android  
+            goarch: arm64  
+            goamd64: ''  
+            binary: sing-box  
+            extra_tags: ''  
+            artifact_name: binary-android-arm64  
+            cgo: '1'  
             cc_triple: 'aarch64-linux-android21'
     steps:
       - name: Setup Go
@@ -193,7 +83,7 @@ jobs:
       - name: Checkout sing-box
         uses: actions/checkout@v6
         with:
-          repository: reF1nd/sing-box
+          repository: MissToT/sing-box
           ref: ${{ github.event.inputs.commit_hash != '' && github.event.inputs.commit_hash || format('v{0}', github.event.inputs.version) }}
           path: sing-box
           fetch-depth: 0
@@ -218,20 +108,24 @@ jobs:
           ndk-version: r28
           #local-cache: true
 
-      - name: Compute build environment
-        id: env
-        shell: bash
-        run: |
-          TAGS="${TAGS_COMMON},${TAGS_CLI_EXTRA}${{ matrix.extra_tags }}"
-          CGO="${{ matrix.cgo || '0' }}"
-
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-          echo "cgo=${CGO}" >> "$GITHUB_OUTPUT"
-
-          echo "--- Build Environment ---"
-          echo "Platform: ${{ matrix.platform }}"
-          echo "Arch: ${{ matrix.arch }}"
-          echo "Tags: ${TAGS}"
+      - name: Compute build environment  
+        id: env  
+        shell: bash  
+        run: |  
+          if [[ -n "${{ github.event.inputs.custom_tags }}" ]]; then  
+            TAGS="${{ github.event.inputs.custom_tags }}${{ matrix.extra_tags }}"  
+          else  
+            TAGS="${TAGS_COMMON},${TAGS_CLI_EXTRA}${{ matrix.extra_tags }}"  
+          fi  
+          CGO="${{ matrix.cgo || '0' }}"  
+  
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"  
+          echo "cgo=${CGO}" >> "$GITHUB_OUTPUT"  
+  
+          echo "--- Build Environment ---"  
+          echo "Platform: ${{ matrix.platform }}"  
+          echo "Arch: ${{ matrix.arch }}"  
+          echo "Tags: ${TAGS}"  
           echo "CGO: ${CGO}"
 
       - name: Build
@@ -332,7 +226,7 @@ jobs:
       - name: Checkout sing-box
         uses: actions/checkout@v6
         with:
-          repository: reF1nd/sing-box
+          repository: MissToT/sing-box
           ref: ${{ github.event.inputs.commit_hash != '' && github.event.inputs.commit_hash || format('v{0}', github.event.inputs.version) }}
           path: sing-box
           fetch-depth: 0
@@ -352,7 +246,7 @@ jobs:
       - name: Checkout sing-box-for-android
         uses: actions/checkout@v6
         with:
-          repository: reF1nd/sing-box-for-android
+          repository: MissToT/sing-box-for-android
           ref: reF1nd-oldstable
           path: sing-box-for-android
 
@@ -365,11 +259,15 @@ jobs:
           sed -i "s/^VERSION_NAME=.*/VERSION_NAME=${{ github.event.inputs.version }}/" "$FILE"
           grep '^VERSION_NAME=' "$FILE"
 
-      - name: Compute build tags
-        id: env
-        run: |
-          TAGS="${TAGS_COMMON},${TAGS_SFA_EXTRA}"
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+      - name: Compute build tags  
+        id: env  
+        run: |  
+          if [[ -n "${{ github.event.inputs.custom_tags }}" ]]; then  
+            TAGS="${{ github.event.inputs.custom_tags }}"  
+          else  
+            TAGS="${TAGS_COMMON},${TAGS_SFA_EXTRA}"  
+          fi  
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"  
           echo "Build tags: ${TAGS}"
 
       - name: Build library
@@ -433,11 +331,11 @@ jobs:
           path: |
             sing-box-for-android/app/build/outputs/apk/other/release/*.apk
 
-  release:
-    name: Publish Release
-    runs-on: ubuntu-latest
-    needs: [build_cli, build_android]
-    if: ${{ always() && github.event.inputs.publish_release != 'none' && (github.event.inputs.build_cli == 'true' || github.event.inputs.build_android_gui == 'true') && (github.event.inputs.build_cli != 'true' || needs.build_cli.result == 'success') && (github.event.inputs.build_android_gui != 'true' || needs.build_android.result == 'success') }}
+  release:  
+    name: Publish Release  
+    runs-on: ubuntu-latest  
+    needs: [build_cli]  
+    if: ${{ always() && github.event.inputs.publish_release != 'none' && github.event.inputs.build_cli == 'true' && needs.build_cli.result == 'success' }}
     permissions:
       contents: write
     steps:
@@ -469,7 +367,7 @@ jobs:
             echo "| Field | Value |"
             echo "|---|---|"
             echo "| Version | \`${VERSION}\` |"
-            echo "| sing-box Branch | [\`reF1nd-oldstable\`](https://github.com/reF1nd/sing-box/tree/reF1nd-oldstable) |"
+            echo "| sing-box Branch | [\`reF1nd-oldstable\`](https://github.com/MissToT/sing-box/tree/reF1nd-oldstable) |"
             echo "| Built At | ${BUILT_AT} |"
             echo "| Run ID | [${RUN_ID}](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) |"
           } > release-notes.md
@@ -516,44 +414,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Organize release files
-        run: |
-          mkdir -p release_files/sfa release_files/android release_files/others
-          mv release_files/SFA-* release_files/sfa/ 2>/dev/null || true
-          mv release_files/sing-box-*-android-* release_files/android/ 2>/dev/null || true
+      - name: Organize release files  
+        run: |  
+          mkdir -p release_files/others  
           mv release_files/sing-box-* release_files/others/ 2>/dev/null || true
-
-      - name: Post SFA to channel
-        uses: xireiki/channel-post@v2
-        with: 
-          chat_id: ${{ secrets.CHAT_ID }}
-          bot_token: ${{ secrets.BOT_TOKEN }}
-          path: release_files/sfa/*
-          context: "#oldstable\nSFA-${{ github.event.inputs.version }}"
-          parse_mode: HTML
-          large_file: true
-          api_id: ${{ secrets.API_ID }}
-          api_hash: ${{ secrets.API_HASH }}
-          method: sendFile
-
-    #  - name: Kill telegram-bot-api between posts
-    #    run: pkill -f telegram-bot-api || true
-
-      - name: Post sing-box-android to channel
-        uses: xireiki/channel-post@v2
-        with: 
-          chat_id: ${{ secrets.CHAT_ID }}
-          bot_token: ${{ secrets.BOT_TOKEN }}
-          path: release_files/android/*
-          context: "#oldstable\nsing-box-${{ github.event.inputs.version }}-android"
-          parse_mode: HTML
-          large_file: true
-          api_id: ${{ secrets.API_ID }}
-          api_hash: ${{ secrets.API_HASH }}
-          method: sendFile
-
-    #  - name: Kill telegram-bot-api between posts
-    #    run: pkill -f telegram-bot-api || true
 
       - name: Post sing-box to channel
         uses: xireiki/channel-post@v2
