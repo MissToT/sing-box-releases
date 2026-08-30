@@ -82,16 +82,6 @@ jobs:
             variant: purego  
             artifact_name: binary-windows-amd64  
             naive: true  
-          - platform: windows  
-            arch: amd64v3  
-            os: windows-latest  
-            goos: windows  
-            goarch: amd64  
-            goamd64: v3  
-            binary: sing-box.exe  
-            variant: purego  
-            artifact_name: binary-windows-amd64v3  
-            naive: true  
           - platform: android  
             arch: arm64  
             os: ubuntu-26.04  
