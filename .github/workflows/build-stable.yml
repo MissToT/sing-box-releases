@@ -16,11 +16,16 @@ on:
         type: boolean  
         default: true  
       custom_tags:  
-        description: '自定义编译 tags，使用英文逗号分隔。留空则使用默认 tags(默认不含 with_naive_outbound，除非下方开关开启)'  
+        description: '自定义编译 tags，使用英文逗号分隔。留空则使用默认 tags(默认不含 with_ebpf/with_naive_outbound，除非下方开关开启)'  
         required: false  
         default: ''  
       enable_naive_outbound:  
         description: '是否启用 with_naive_outbound 标签（仅对 naive 变体构建生效）'  
+        required: false  
+        type: boolean  
+        default: false  
+      enable_ebpf:  
+        description: '是否启用 with_ebpf 标签（仅限 Linux/Android 平台）'  
         required: false  
         type: boolean  
         default: false
@@ -30,8 +35,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '~1.25.12'
-  GO_VERSION_DARWIN: '^1.25.3'
+  GO_VERSION: '1.26.7'
+  GO_VERSION_DARWIN: '1.26.7'
 
 jobs:
   resolve_source:
@@ -174,7 +179,6 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r28
-          #local-cache: true
 
       - name: Clone cronet-go
         if: matrix.variant == 'glibc' || matrix.variant == 'musl'
@@ -244,6 +248,9 @@ jobs:
           if [[ "${{ github.event.inputs.enable_naive_outbound }}" == "true" && "${{ matrix.naive }}" == "true" && "${TAGS}" != *with_naive_outbound* ]]; then  
             TAGS="${TAGS},with_naive_outbound"  
           fi  
+          if [[ "${{ github.event.inputs.enable_ebpf }}" == "true" && -d sing-box/common/ebpf && ("${{ matrix.platform }}" == "linux" || "${{ matrix.platform }}" == "android") && "${TAGS}" != *with_ebpf* ]]; then  
+            TAGS="${TAGS},with_ebpf"  
+          fi
           ARCHIVE_SUFFIX=""
 
           case "${{ matrix.variant }}" in
@@ -446,7 +453,7 @@ jobs:
               source_sha: $source_sha,
               built_at: $built_at,
               build: {
-                cli: $build_cli,
+                cli: $build_cli
               },
               artifacts: $artifact_files[0]
             }' > build-manifest.json
