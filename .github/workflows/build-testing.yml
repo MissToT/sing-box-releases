@@ -248,7 +248,7 @@ jobs:
           if [[ "${{ github.event.inputs.enable_naive_outbound }}" == "true" && "${{ matrix.naive }}" == "true" && "${TAGS}" != *with_naive_outbound* ]]; then  
             TAGS="${TAGS},with_naive_outbound"  
           fi  
-          if [[ "${{ github.event.inputs.enable_ebpf }}" == "true" && -d sing-box/common/ebpf && ("${{ matrix.platform }}" == "linux" || "${{ matrix.platform }}" == "android") && "${TAGS}" != *with_ebpf* ]]; then  
+          if [[ "${{ github.event.inputs.enable_ebpf }}" == "true" && -f sing-box/include/ebpf.go && ("${{ matrix.platform }}" == "linux" || "${{ matrix.platform }}" == "android") && "${TAGS}" != *with_ebpf* ]]; then  
             TAGS="${TAGS},with_ebpf"  
           fi
           ARCHIVE_SUFFIX=""
