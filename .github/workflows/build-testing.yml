@@ -10,6 +10,10 @@ on:
         description: '可选的 commit hash，指定后将覆盖 version 版本标签'
         required: false
         default: ''
+      go_version:
+        description: '自定义 Go 版本（留空使用默认 1.26.8）'
+        required: false
+        default: ''
       custom_tags:
         description: '自定义编译 tags，使用英文逗号分隔。留空则使用默认 tags(默认不含 with_ebpf/with_naive_outbound，除非下方开关开启)'
         required: false
@@ -30,7 +34,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.26.8'
+  GO_VERSION: ${{ inputs.go_version != '' && inputs.go_version || '1.26.8' }}
 
 permissions:
   contents: read
@@ -74,13 +78,14 @@ jobs:
       matrix:
         include:
           - platform: windows
-            arch: amd64
+            arch: amd64v3
             os: windows-latest
             goos: windows
             goarch: amd64
-            goamd64: v1
+            goamd64: v3
             binary: sing-box.exe
-            variant: core
+            variant: purego
+            naive: true
           - platform: android
             arch: arm64
             os: ubuntu-26.04
@@ -105,6 +110,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: sing-box/go.sum
 
       - name: Setup Android NDK
         if: matrix.platform == 'android'
@@ -138,20 +144,6 @@ jobs:
             TAGS="${{ github.event.inputs.custom_tags }}"
           else
             TAGS="${DEFAULT_TAGS}"
-          fi
-
-          # kTLS 只在 linux 系生效；core 变体不编 naive
-          DROP_TAGS=""
-          if [[ "${{ matrix.platform }}" != "linux" && "${{ matrix.platform }}" != "android" ]]; then
-            DROP_TAGS="badlinkname tfogo_checklinkname0"
-          fi
-          if [[ "${{ matrix.variant }}" == "core" ]]; then
-            DROP_TAGS="${DROP_TAGS} with_naive_outbound with_purego"
-          fi
-          if [[ -n "$DROP_TAGS" ]]; then
-            TAGS=$(printf '%s' "$TAGS" | tr ', ' '\n\n' | awk -v drop="$DROP_TAGS" '
-              BEGIN { n = split(drop, d, " "); for (i = 1; i <= n; i++) bad[d[i]] = 1 }
-              NF && !($0 in bad) { printf "%s%s", sep, $0; sep = "," }')
           fi
 
           if [[ "${{ github.event.inputs.enable_naive_outbound }}" == "true" && "${{ matrix.naive }}" == "true" && "${TAGS}" != *with_naive_outbound* ]]; then
@@ -191,6 +183,19 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOAMD64: ${{ matrix.goamd64 }}
 
+      - name: Extract libcronet.dll
+        if: matrix.variant == 'purego' && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $CRONET_GO_VERSION = Get-Content sing-box/.github/CRONET_GO_VERSION
+          $LIBRARY_PATH = "lib/windows_${{ matrix.goarch }}/libcronet.dll"
+          git init "$env:RUNNER_TEMP/cronet-go-lib"
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" remote add origin https://github.com/sagernet/cronet-go.git
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" sparse-checkout set --no-cone "/$LIBRARY_PATH"
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" checkout FETCH_HEAD
+          Copy-Item "$env:RUNNER_TEMP/cronet-go-lib/$LIBRARY_PATH" sing-box/dist
+
       - name: Archive (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -200,9 +205,13 @@ jobs:
           mkdir "$DIR_NAME"
           Copy-Item ../LICENSE "$DIR_NAME/"
           Copy-Item sing-box.exe "$DIR_NAME/"
+          if (Test-Path libcronet.dll) {
+              Copy-Item libcronet.dll "$DIR_NAME/"
+          }
           Compress-Archive -Path "$DIR_NAME" -DestinationPath "$DIR_NAME.zip"
           Remove-Item -Recurse "$DIR_NAME"
           Remove-Item sing-box.exe
+          if (Test-Path libcronet.dll) { Remove-Item libcronet.dll }
 
       - name: Archive (Android)
         if: matrix.platform == 'android'
