@@ -225,7 +225,7 @@ jobs:
     name: Finalize build artifacts
     runs-on: ubuntu-latest
     needs: [resolve_source, build_cli]
-    if: ${{ always() && needs.resolve_source.result == "success" && needs.build_cli.result == "success" }}
+    if: ${{ always() && needs.resolve_source.result == 'success' && needs.build_cli.result == 'success' }}
     permissions:
       actions: read
       contents: read
