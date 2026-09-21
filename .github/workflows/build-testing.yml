@@ -3,6 +3,7 @@ name: Build sing-box testing
 on:
   workflow_dispatch:
     inputs:
+      # ---- 必填 / 每次都会填 ----
       version:
         description: '版本号或从 commit hash 构建时的临时标签 (例如 1.13.0-rc.4)'
         required: true
@@ -10,14 +11,8 @@ on:
         description: '可选的 commit hash，指定后将覆盖 version 版本标签'
         required: false
         default: ''
-      source_repository:
-        description: '拉取源码的仓库（owner/repo 或完整仓库 URL），留空使用默认 MissToT/sing-box。私有仓库需配置 Secrets：SING_BOX_REPOSITORY_TOKEN'
-        required: false
-        default: ''
-      go_version:
-        description: '自定义 Go 版本（留空使用默认 1.26.8）'
-        required: false
-        default: ''
+
+      # ---- 编译内容与产物开关（常用）----
       custom_tags:
         description: '自定义编译 tags，使用英文逗号分隔。留空则使用默认 tags(默认不含 with_ebpf/with_naive_outbound，除非下方开关开启)'
         required: false
@@ -33,10 +28,20 @@ on:
         type: boolean
         default: false
       enable_upx:
-        description: '是否用 UPX 压缩核心（自动使用最新版 UPX，产物中同时保留原始二进制和压缩后的二进制）'
+        description: '是否额外产出 UPX 压缩后的核心（独立的 -upx<版本> artifact，不影响原核心产物）'
         required: false
         type: boolean
         default: false
+
+      # ---- 高级选项（基本不用动）----
+      go_version:
+        description: '自定义 Go 版本（留空使用默认 1.26.8）'
+        required: false
+        default: ''
+      source_repository:
+        description: '拉取源码的仓库（owner/repo 或完整仓库 URL），留空使用默认 MissToT/sing-box。私有仓库需配置 Secrets：SING_BOX_REPOSITORY_TOKEN'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version }}
