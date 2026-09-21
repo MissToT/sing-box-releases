@@ -10,6 +10,10 @@ on:
         description: '可选的 commit hash，指定后将覆盖 version 版本标签'
         required: false
         default: ''
+      source_repository:
+        description: '拉取源码的仓库（owner/repo 或完整仓库 URL），留空使用默认 MissToT/sing-box。私有仓库需配置 Secrets：SING_BOX_REPOSITORY_TOKEN'
+        required: false
+        default: ''
       go_version:
         description: '自定义 Go 版本（留空使用默认 1.26.8）'
         required: false
@@ -45,12 +49,70 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
+      source_repository: ${{ steps.source_repo.outputs.repository }}
+      use_token: ${{ steps.source_repo.outputs.use_token }}
     steps:
+      - name: Resolve source repository
+        id: source_repo
+        shell: bash
+        env:
+          INPUT_SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          DEFAULT_SOURCE_REPOSITORY: MissToT/sing-box
+          SOURCE_REPOSITORY_TOKEN: ${{ secrets.SING_BOX_REPOSITORY_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          source_repository="${INPUT_SOURCE_REPOSITORY:-$DEFAULT_SOURCE_REPOSITORY}"
+          source_repository="${source_repository#https://}"
+          source_repository="${source_repository#http://}"
+          source_repository="${source_repository#git@}"
+          source_repository="${source_repository#github.com/}"
+          source_repository="${source_repository#github.com:}"
+          source_repository="${source_repository%.git}"
+          source_repository="${source_repository%/}"
+
+          if [[ ! "$source_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "源码仓库格式无效，应填 owner/repo" >&2
+            echo "不要把 token 或用户名密码写在仓库地址里，私有仓库的凭据请配置到 Secrets: SING_BOX_REPOSITORY_TOKEN" >&2
+            exit 1
+          fi
+
+          probe() {
+            timeout 60 git ls-remote --exit-code "$1" >/dev/null 2>&1
+          }
+
+          default_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${source_repository}.git"
+          secret_url="https://x-access-token:${SOURCE_REPOSITORY_TOKEN}@github.com/${source_repository}.git"
+
+          if [[ -n "$SOURCE_REPOSITORY_TOKEN" ]] && probe "$secret_url"; then
+            use_token=true
+          elif probe "$default_url"; then
+            use_token=false
+            if [[ -n "$SOURCE_REPOSITORY_TOKEN" ]]; then
+              echo "SING_BOX_REPOSITORY_TOKEN 无法访问 ${source_repository}，改用当前仓库凭据" >&2
+            fi
+          else
+            echo "无法访问源码仓库 ${source_repository}" >&2
+            if [[ -n "$SOURCE_REPOSITORY_TOKEN" ]]; then
+              echo "请确认 SING_BOX_REPOSITORY_TOKEN 有效并具备该仓库读取权限" >&2
+            else
+              echo "私有仓库请在仓库 Secrets 中配置具备读取权限的 SING_BOX_REPOSITORY_TOKEN" >&2
+            fi
+            exit 1
+          fi
+
+          echo "repository=${source_repository}" >> "$GITHUB_OUTPUT"
+          echo "use_token=${use_token}" >> "$GITHUB_OUTPUT"
+          echo "Resolved source repository: ${source_repository} (use_token=${use_token})"
+
       - name: Checkout sing-box
         uses: actions/checkout@v6
         with:
-          repository: MissToT/sing-box
+          repository: ${{ steps.source_repo.outputs.repository }}
           ref: ${{ inputs.commit_hash != '' && inputs.commit_hash || format('v{0}', inputs.version) }}
+          token: ${{ steps.source_repo.outputs.use_token == 'true' && secrets.SING_BOX_REPOSITORY_TOKEN || github.token }}
           path: sing-box
           fetch-depth: 1
 
@@ -100,8 +162,9 @@ jobs:
       - name: Checkout sing-box
         uses: actions/checkout@v6
         with:
-          repository: MissToT/sing-box
+          repository: ${{ needs.resolve_source.outputs.source_repository }}
           ref: ${{ needs.resolve_source.outputs.source_sha }}
+          token: ${{ needs.resolve_source.outputs.use_token == 'true' && secrets.SING_BOX_REPOSITORY_TOKEN || github.token }}
           path: sing-box
           fetch-depth: 1
 
@@ -271,6 +334,7 @@ jobs:
             --arg head_branch "${{ github.ref_name }}" \
             --arg head_sha "${{ github.sha }}" \
             --arg version "${{ inputs.version }}" \
+            --arg source_repository "${{ needs.resolve_source.outputs.source_repository }}" \
             --arg source_sha "${{ needs.resolve_source.outputs.source_sha }}" \
             --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --argjson run_id "${{ github.run_id }}" \
@@ -285,6 +349,7 @@ jobs:
               run_id: $run_id,
               run_attempt: $run_attempt,
               version: $version,
+              source_repository: $source_repository,
               source_sha: $source_sha,
               built_at: $built_at,
               build: {
