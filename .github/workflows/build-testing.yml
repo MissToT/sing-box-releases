@@ -181,7 +181,6 @@ jobs:
             binary: sing-box.exe
             variant: purego
             naive: true
-            upx_asset: win64.zip
           - platform: android
             arch: arm64
             os: ubuntu-26.04
@@ -192,7 +191,6 @@ jobs:
             cgo: '1'
             cc_triple: 'aarch64-linux-android23'
             naive: true
-            upx_asset: amd64_linux.tar.xz
     steps:
       - name: Checkout sing-box
         uses: actions/checkout@v6
@@ -342,16 +340,90 @@ jobs:
           echo "--- core ---"
           ls -lh core
 
-      # 核心先上传：UPX 压缩（--best 很慢）期间就能先下载核心
+      # 核心产物在 build_cli 里就上传完，UPX 由后面的 build_upx job 单独处理，
+      # 所以核心包不用等 UPX 压缩（--best 很慢），可以先下载
       - name: Upload core artifact
         uses: actions/upload-artifact@v7
         with:
           name: sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: sing-box/dist/core/*
 
-      # ===== 以下全部是 UPX 处理，排在核心上传之后 =====
+  # UPX 是独立的一层 job：build_cli 跑完并上传核心产物之后才开始，
+  # 直接复用核心产物里的二进制来压缩，不重新编译（省一半 CI 时间，也保证压的就是核心包里的那个二进制）
+  build_upx:
+    name: Build UPX ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    needs: [resolve_source, build_cli]
+    if: ${{ inputs.enable_upx && needs.build_cli.result == 'success' }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            arch: amd64v3
+            os: windows-latest
+            upx_asset: win64.zip
+          - platform: android
+            arch: arm64
+            os: ubuntu-26.04
+            upx_asset: amd64_linux.tar.xz
+    steps:
+      - name: Resolve core artifact name
+        id: core
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.resolve_source.outputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          short_sha="${SOURCE_SHA:0:7}"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "artifact=sing-box-${VERSION}-${short_sha}-${{ matrix.platform }}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          echo "Resolved core artifact: sing-box-${VERSION}-${short_sha}-${{ matrix.platform }}-${{ matrix.arch }}"
+
+      - name: Download core artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.core.outputs.artifact }}
+          path: core-artifact
+
+      - name: Extract core binary (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ARTIFACT = "${{ steps.core.outputs.artifact }}"
+          Expand-Archive -LiteralPath "core-artifact/$ARTIFACT.zip" -DestinationPath "core-artifact" -Force
+
+          $SRC = "core-artifact/$ARTIFACT"
+          if (-not (Test-Path "$SRC/sing-box.exe")) { throw "核心产物里没有 sing-box.exe" }
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "$SRC/sing-box.exe" dist/
+          Copy-Item "$SRC/LICENSE" dist/
+          if (Test-Path "$SRC/libcronet.dll") { Copy-Item "$SRC/libcronet.dll" dist/ }
+
+          Write-Host "--- 待压缩 ---"
+          Get-ChildItem -File dist | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Extract core binary (Android)
+        if: matrix.platform == 'android'
+        run: |
+          set -xeuo pipefail
+          ARTIFACT="${{ steps.core.outputs.artifact }}"
+          tar -xzf "core-artifact/$ARTIFACT.tar.gz" -C core-artifact
+          [[ -f "core-artifact/$ARTIFACT/sing-box" ]] || { echo "核心产物里没有 sing-box" >&2; exit 1; }
+
+          mkdir -p dist
+          cp "core-artifact/$ARTIFACT/sing-box" dist/
+          cp "core-artifact/$ARTIFACT/LICENSE" dist/
+          chmod +x dist/sing-box
+
+          echo "--- 待压缩 ---"
+          ls -lh dist
+
       - name: Install UPX (Linux)
-        if: inputs.enable_upx && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         shell: bash
         env:
           UPX_TAG: ${{ needs.resolve_source.outputs.upx_tag }}
@@ -378,7 +450,7 @@ jobs:
           "$UPX_BIN" --version
 
       - name: Install UPX (Windows)
-        if: inputs.enable_upx && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           UPX_TAG: ${{ needs.resolve_source.outputs.upx_tag }}
@@ -403,12 +475,11 @@ jobs:
           & $UPX.FullName --version
 
       - name: Compress with UPX
-        if: inputs.enable_upx
         id: upx
         shell: bash
         run: |
           set -xeuo pipefail
-          cd sing-box/dist
+          cd dist
 
           UPX_VERSION="${{ needs.resolve_source.outputs.upx_version }}"
           if [[ "${{ matrix.platform }}" == "windows" ]]; then
@@ -434,7 +505,7 @@ jobs:
           if [[ "$UPX_PACKED" != "true" ]]; then
             # 失败时清掉副本，避免把未压缩或半成品文件当成压缩版发出去
             rm -f "$DST"
-            echo "::warning::UPX 压缩失败，${{ matrix.platform }}-${{ matrix.arch }} 只发布未压缩的核心（失败原因见上方 upx 输出）"
+            echo "::warning::UPX 压缩失败，${{ matrix.platform }}-${{ matrix.arch }} 不产出 UPX 包（失败原因见上方 upx 输出）"
             echo "upx_suffix=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -456,7 +527,7 @@ jobs:
           cat UPX.txt
           echo "upx_suffix=-upx${UPX_VERSION}" >> "$GITHUB_OUTPUT"
 
-      # ===== UPX 产物（独立 artifact，完全不碰上面的核心产物）=====
+      # ===== UPX 产物（独立 artifact，完全不碰核心产物）=====
       # artifact 名：sing-box-<版本>-<短sha>-<平台>-<架构>-upx<UPX版本>
       # 包内：同名的 .zip / .tar.gz；压缩包里的文件名保持原样，不额外加 -upx
       #       （sing-box.exe / sing-box + UPX.txt + LICENSE），upx 信息由包名和 UPX.txt 承载
@@ -466,12 +537,12 @@ jobs:
         if: matrix.platform == 'windows' && steps.upx.outputs.upx_suffix != ''
         shell: pwsh
         run: |
-          cd sing-box/dist
-          $DIR_NAME = "sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-windows-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
+          cd dist
+          $DIR_NAME = "sing-box-${{ inputs.version }}-${{ steps.core.outputs.short_sha }}-windows-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
 
           if (-not (Test-Path sing-box-upx.exe)) { throw "未找到 UPX 压缩产物 sing-box-upx.exe" }
           New-Item -ItemType Directory -Force -Path $DIR_NAME | Out-Null
-          Copy-Item ../LICENSE "$DIR_NAME/"
+          Copy-Item LICENSE "$DIR_NAME/"
           Copy-Item sing-box-upx.exe "$DIR_NAME/sing-box.exe"
           if (Test-Path libcronet.dll) { Copy-Item libcronet.dll "$DIR_NAME/" }
           if (Test-Path UPX.txt) { Copy-Item UPX.txt "$DIR_NAME/" }
@@ -488,12 +559,12 @@ jobs:
         if: matrix.platform == 'android' && steps.upx.outputs.upx_suffix != ''
         run: |
           set -xeuo pipefail
-          cd sing-box/dist
-          DIR_NAME="sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-android-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
+          cd dist
+          DIR_NAME="sing-box-${{ inputs.version }}-${{ steps.core.outputs.short_sha }}-android-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
 
           [[ -f sing-box-upx ]] || { echo "未找到 UPX 压缩产物 sing-box-upx" >&2; exit 1; }
           mkdir -p "$DIR_NAME"
-          cp ../LICENSE "$DIR_NAME/"
+          cp LICENSE "$DIR_NAME/"
           cp sing-box-upx "$DIR_NAME/sing-box"
           chmod +x "$DIR_NAME/sing-box"
           if [[ -f UPX.txt ]]; then
@@ -512,14 +583,14 @@ jobs:
         if: steps.upx.outputs.upx_suffix != ''
         uses: actions/upload-artifact@v7
         with:
-          name: sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}
-          path: sing-box/dist/upx/*
+          name: sing-box-${{ inputs.version }}-${{ steps.core.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}
+          path: dist/upx/*
 
   finalize_build:
     name: Finalize build artifacts
     runs-on: ubuntu-latest
-    needs: [resolve_source, build_cli]
-    if: ${{ always() && needs.resolve_source.result == 'success' && needs.build_cli.result == 'success' }}
+    needs: [resolve_source, build_cli, build_upx]
+    if: ${{ always() && needs.resolve_source.result == 'success' && needs.build_cli.result == 'success' && (needs.build_upx.result == 'success' || needs.build_upx.result == 'skipped') }}
     permissions:
       actions: read
       contents: read
