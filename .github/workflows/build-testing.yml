@@ -217,58 +217,6 @@ jobs:
         with:
           ndk-version: r28
 
-      - name: Install UPX (Linux)
-        if: inputs.enable_upx && runner.os == 'Linux'
-        shell: bash
-        env:
-          UPX_TAG: ${{ needs.resolve_source.outputs.upx_tag }}
-          UPX_VERSION: ${{ needs.resolve_source.outputs.upx_version }}
-          UPX_ASSET: ${{ matrix.upx_asset }}
-        run: |
-          set -euo pipefail
-          DEST="$RUNNER_TEMP/upx-${UPX_VERSION}"
-          mkdir -p "$DEST"
-          URL="https://github.com/upx/upx/releases/download/${UPX_TAG}/upx-${UPX_VERSION}-${UPX_ASSET}"
-          if ! curl -fsSL "$URL" -o "$DEST/$UPX_ASSET"; then
-            echo "下载 UPX 失败: ${URL}" >&2
-            echo "该版本可用资源:" >&2
-            curl -fsSL "https://api.github.com/repos/upx/upx/releases/tags/${UPX_TAG}" | jq -r '.assets[].name' >&2 || true
-            exit 1
-          fi
-          tar -xJf "$DEST/$UPX_ASSET" -C "$DEST"
-          UPX_BIN=$(find "$DEST" -type f -name upx | head -n 1)
-          if [[ -z "$UPX_BIN" ]]; then
-            echo "未在解压结果中找到 upx 可执行文件" >&2
-            exit 1
-          fi
-          echo "$(dirname "$UPX_BIN")" >> "$GITHUB_PATH"
-          "$UPX_BIN" --version
-
-      - name: Install UPX (Windows)
-        if: inputs.enable_upx && runner.os == 'Windows'
-        shell: pwsh
-        env:
-          UPX_TAG: ${{ needs.resolve_source.outputs.upx_tag }}
-          UPX_VERSION: ${{ needs.resolve_source.outputs.upx_version }}
-          UPX_ASSET: ${{ matrix.upx_asset }}
-        run: |
-          $DEST = Join-Path $env:RUNNER_TEMP "upx-$env:UPX_VERSION"
-          New-Item -ItemType Directory -Force -Path $DEST | Out-Null
-          $URL = "https://github.com/upx/upx/releases/download/$env:UPX_TAG/upx-$env:UPX_VERSION-$env:UPX_ASSET"
-          $ZIP = Join-Path $DEST $env:UPX_ASSET
-          try {
-              Invoke-WebRequest -Uri $URL -OutFile $ZIP
-          } catch {
-              Write-Host "下载 UPX 失败: $URL"
-              (Invoke-RestMethod -Uri "https://api.github.com/repos/upx/upx/releases/tags/$env:UPX_TAG").assets.name | Write-Host
-              throw
-          }
-          Expand-Archive -LiteralPath $ZIP -DestinationPath $DEST -Force
-          $UPX = Get-ChildItem -Path $DEST -Recurse -Filter upx.exe | Select-Object -First 1
-          if (-not $UPX) { throw "未在解压结果中找到 upx.exe" }
-          Add-Content -Path $env:GITHUB_PATH -Value $UPX.DirectoryName
-          & $UPX.FullName --version
-
       - name: Set build tag
         shell: bash
         run: |
@@ -336,6 +284,124 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOAMD64: ${{ matrix.goamd64 }}
 
+      - name: Extract libcronet.dll
+        if: matrix.variant == 'purego' && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $CRONET_GO_VERSION = Get-Content sing-box/.github/CRONET_GO_VERSION
+          $LIBRARY_PATH = "lib/windows_${{ matrix.goarch }}/libcronet.dll"
+          git init "$env:RUNNER_TEMP/cronet-go-lib"
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" remote add origin https://github.com/sagernet/cronet-go.git
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" sparse-checkout set --no-cone "/$LIBRARY_PATH"
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"
+          git -C "$env:RUNNER_TEMP/cronet-go-lib" checkout FETCH_HEAD
+          Copy-Item "$env:RUNNER_TEMP/cronet-go-lib/$LIBRARY_PATH" sing-box/dist
+
+      # ===== 原核心产物 =====
+      # artifact 名：sing-box-<版本>-<短sha>-<平台>-<架构>
+      # 包内：同名的 .zip / .tar.gz，压缩包里的文件名保持原样（sing-box.exe / LICENSE / libcronet.dll）
+      # 不受 UPX 开关影响；这里用 Copy 而不是 Move，因为后面的 UPX 压缩还要用到未压缩的核心
+      - name: Stage core artifacts (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cd sing-box/dist
+          $DIR_NAME = "sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-windows-${{ matrix.arch }}"
+
+          if (-not (Test-Path sing-box.exe)) { throw "未找到构建产物 sing-box.exe" }
+          New-Item -ItemType Directory -Force -Path $DIR_NAME | Out-Null
+          Copy-Item ../LICENSE "$DIR_NAME/"
+          Copy-Item sing-box.exe "$DIR_NAME/"
+          if (Test-Path libcronet.dll) { Copy-Item libcronet.dll "$DIR_NAME/" }
+          Compress-Archive -Path "$DIR_NAME" -DestinationPath "$DIR_NAME.zip"
+          Remove-Item -Recurse "$DIR_NAME"
+
+          New-Item -ItemType Directory -Force -Path core | Out-Null
+          Move-Item "$DIR_NAME.zip" core/
+
+          Write-Host "--- core ---"
+          Get-ChildItem -File core | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Stage core artifacts (Android)
+        if: matrix.platform == 'android'
+        run: |
+          set -xeuo pipefail
+          cd sing-box/dist
+          DIR_NAME="sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-android-${{ matrix.arch }}"
+
+          [[ -f sing-box ]] || { echo "未找到构建产物 sing-box" >&2; exit 1; }
+          mkdir -p "$DIR_NAME"
+          cp ../LICENSE "$DIR_NAME/"
+          cp sing-box "$DIR_NAME/"
+          tar -czvf "$DIR_NAME.tar.gz" "$DIR_NAME"
+          rm -rf "$DIR_NAME"
+
+          mkdir -p core
+          mv "$DIR_NAME.tar.gz" core/
+
+          echo "--- core ---"
+          ls -lh core
+
+      # 核心先上传：UPX 压缩（--best 很慢）期间就能先下载核心
+      - name: Upload core artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: sing-box/dist/core/*
+
+      # ===== 以下全部是 UPX 处理，排在核心上传之后 =====
+      - name: Install UPX (Linux)
+        if: inputs.enable_upx && runner.os == 'Linux'
+        shell: bash
+        env:
+          UPX_TAG: ${{ needs.resolve_source.outputs.upx_tag }}
+          UPX_VERSION: ${{ needs.resolve_source.outputs.upx_version }}
+          UPX_ASSET: ${{ matrix.upx_asset }}
+        run: |
+          set -euo pipefail
+          DEST="$RUNNER_TEMP/upx-${UPX_VERSION}"
+          mkdir -p "$DEST"
+          URL="https://github.com/upx/upx/releases/download/${UPX_TAG}/upx-${UPX_VERSION}-${UPX_ASSET}"
+          if ! curl -fsSL "$URL" -o "$DEST/$UPX_ASSET"; then
+            echo "下载 UPX 失败: ${URL}" >&2
+            echo "该版本可用资源:" >&2
+            curl -fsSL "https://api.github.com/repos/upx/upx/releases/tags/${UPX_TAG}" | jq -r '.assets[].name' >&2 || true
+            exit 1
+          fi
+          tar -xJf "$DEST/$UPX_ASSET" -C "$DEST"
+          UPX_BIN=$(find "$DEST" -type f -name upx | head -n 1)
+          if [[ -z "$UPX_BIN" ]]; then
+            echo "未在解压结果中找到 upx 可执行文件" >&2
+            exit 1
+          fi
+          echo "$(dirname "$UPX_BIN")" >> "$GITHUB_PATH"
+          "$UPX_BIN" --version
+
+      - name: Install UPX (Windows)
+        if: inputs.enable_upx && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          UPX_TAG: ${{ needs.resolve_source.outputs.upx_tag }}
+          UPX_VERSION: ${{ needs.resolve_source.outputs.upx_version }}
+          UPX_ASSET: ${{ matrix.upx_asset }}
+        run: |
+          $DEST = Join-Path $env:RUNNER_TEMP "upx-$env:UPX_VERSION"
+          New-Item -ItemType Directory -Force -Path $DEST | Out-Null
+          $URL = "https://github.com/upx/upx/releases/download/$env:UPX_TAG/upx-$env:UPX_VERSION-$env:UPX_ASSET"
+          $ZIP = Join-Path $DEST $env:UPX_ASSET
+          try {
+              Invoke-WebRequest -Uri $URL -OutFile $ZIP
+          } catch {
+              Write-Host "下载 UPX 失败: $URL"
+              (Invoke-RestMethod -Uri "https://api.github.com/repos/upx/upx/releases/tags/$env:UPX_TAG").assets.name | Write-Host
+              throw
+          }
+          Expand-Archive -LiteralPath $ZIP -DestinationPath $DEST -Force
+          $UPX = Get-ChildItem -Path $DEST -Recurse -Filter upx.exe | Select-Object -First 1
+          if (-not $UPX) { throw "未在解压结果中找到 upx.exe" }
+          Add-Content -Path $env:GITHUB_PATH -Value $UPX.DirectoryName
+          & $UPX.FullName --version
+
       - name: Compress with UPX
         if: inputs.enable_upx
         id: upx
@@ -390,106 +456,57 @@ jobs:
           cat UPX.txt
           echo "upx_suffix=-upx${UPX_VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Extract libcronet.dll
-        if: matrix.variant == 'purego' && matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $CRONET_GO_VERSION = Get-Content sing-box/.github/CRONET_GO_VERSION
-          $LIBRARY_PATH = "lib/windows_${{ matrix.goarch }}/libcronet.dll"
-          git init "$env:RUNNER_TEMP/cronet-go-lib"
-          git -C "$env:RUNNER_TEMP/cronet-go-lib" remote add origin https://github.com/sagernet/cronet-go.git
-          git -C "$env:RUNNER_TEMP/cronet-go-lib" sparse-checkout set --no-cone "/$LIBRARY_PATH"
-          git -C "$env:RUNNER_TEMP/cronet-go-lib" fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"
-          git -C "$env:RUNNER_TEMP/cronet-go-lib" checkout FETCH_HEAD
-          Copy-Item "$env:RUNNER_TEMP/cronet-go-lib/$LIBRARY_PATH" sing-box/dist
-
-      # 原核心产物：只放未压缩的核心 + LICENSE（Windows 额外带 libcronet.dll）。
-      # 例：sing-box-1.15.0-alpha.2-ruruka-043fb37-windows-amd64v3.exe
-      - name: Stage core artifacts (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          cd sing-box/dist
-          $BASE = "sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-windows-${{ matrix.arch }}"
-
-          New-Item -ItemType Directory -Force -Path core | Out-Null
-
-          if (-not (Test-Path sing-box.exe)) { throw "未找到构建产物 sing-box.exe" }
-          Move-Item sing-box.exe "core/${BASE}.exe"
-          Copy-Item ../LICENSE "core/${BASE}-LICENSE"
-
-          if (Test-Path libcronet.dll) {
-              Move-Item libcronet.dll "core/${BASE}-libcronet.dll"
-          }
-
-          Write-Host "--- core ---"
-          Get-ChildItem -File core | Select-Object Name, Length | Format-Table -AutoSize
-
-      # UPX 产物：单独一个 artifact，只放压缩后的核心 + UPX 信息，完全不碰上面的核心产物。
-      # 例：sing-box-1.15.0-alpha.2-ruruka-043fb37-windows-amd64v3-upx5.2.1.exe
+      # ===== UPX 产物（独立 artifact，完全不碰上面的核心产物）=====
+      # artifact 名：sing-box-<版本>-<短sha>-<平台>-<架构>-upx<UPX版本>
+      # 包内：同名的 .zip / .tar.gz；压缩包里的文件名保持原样，不额外加 -upx
+      #       （sing-box.exe / sing-box + UPX.txt + LICENSE），upx 信息由包名和 UPX.txt 承载
+      # 注意：Windows 的 libcronet.dll 也必须一起带上（它不参与压缩，但运行时 naive 出站需要），
+      #       否则这个包解压出来是个跑不了 naive 的残包
       - name: Stage UPX artifacts (Windows)
         if: matrix.platform == 'windows' && steps.upx.outputs.upx_suffix != ''
         shell: pwsh
         run: |
           cd sing-box/dist
-          $BASE = "sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-windows-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
-
-          New-Item -ItemType Directory -Force -Path upx | Out-Null
+          $DIR_NAME = "sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-windows-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
 
           if (-not (Test-Path sing-box-upx.exe)) { throw "未找到 UPX 压缩产物 sing-box-upx.exe" }
-          Move-Item sing-box-upx.exe "upx/${BASE}.exe"
-          Copy-Item ../LICENSE "upx/${BASE}-LICENSE"
+          New-Item -ItemType Directory -Force -Path $DIR_NAME | Out-Null
+          Copy-Item ../LICENSE "$DIR_NAME/"
+          Copy-Item sing-box-upx.exe "$DIR_NAME/sing-box.exe"
+          if (Test-Path libcronet.dll) { Copy-Item libcronet.dll "$DIR_NAME/" }
+          if (Test-Path UPX.txt) { Copy-Item UPX.txt "$DIR_NAME/" }
+          Compress-Archive -Path "$DIR_NAME" -DestinationPath "$DIR_NAME.zip"
+          Remove-Item -Recurse "$DIR_NAME"
 
-          if (Test-Path UPX.txt) {
-              Move-Item UPX.txt "upx/${BASE}-UPX.txt"
-          }
+          New-Item -ItemType Directory -Force -Path upx | Out-Null
+          Move-Item "$DIR_NAME.zip" upx/
 
           Write-Host "--- upx ---"
           Get-ChildItem -File upx | Select-Object Name, Length | Format-Table -AutoSize
-
-      - name: Stage core artifacts (Android)
-        if: matrix.platform == 'android'
-        run: |
-          set -xeuo pipefail
-          cd sing-box/dist
-
-          BASE="sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-android-${{ matrix.arch }}"
-          mkdir -p core
-
-          [[ -f sing-box ]] || { echo "未找到构建产物 sing-box" >&2; exit 1; }
-          mv sing-box "core/$BASE"
-          chmod +x "core/$BASE"
-          cp ../LICENSE "core/$BASE-LICENSE"
-
-          echo "--- core ---"
-          ls -lh core
 
       - name: Stage UPX artifacts (Android)
         if: matrix.platform == 'android' && steps.upx.outputs.upx_suffix != ''
         run: |
           set -xeuo pipefail
           cd sing-box/dist
-
-          BASE="sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-android-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
-          mkdir -p upx
+          DIR_NAME="sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-android-${{ matrix.arch }}${{ steps.upx.outputs.upx_suffix }}"
 
           [[ -f sing-box-upx ]] || { echo "未找到 UPX 压缩产物 sing-box-upx" >&2; exit 1; }
-          mv sing-box-upx "upx/$BASE"
-          chmod +x "upx/$BASE"
-          cp ../LICENSE "upx/$BASE-LICENSE"
-
+          mkdir -p "$DIR_NAME"
+          cp ../LICENSE "$DIR_NAME/"
+          cp sing-box-upx "$DIR_NAME/sing-box"
+          chmod +x "$DIR_NAME/sing-box"
           if [[ -f UPX.txt ]]; then
-            mv UPX.txt "upx/$BASE-UPX.txt"
+            cp UPX.txt "$DIR_NAME/"
           fi
+          tar -czvf "$DIR_NAME.tar.gz" "$DIR_NAME"
+          rm -rf "$DIR_NAME"
+
+          mkdir -p upx
+          mv "$DIR_NAME.tar.gz" upx/
 
           echo "--- upx ---"
           ls -lh upx
-
-      - name: Upload core artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: sing-box-${{ github.event.inputs.version }}-${{ steps.env.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}
-          path: sing-box/dist/core/*
 
       - name: Upload UPX artifact
         if: steps.upx.outputs.upx_suffix != ''
