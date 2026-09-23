@@ -178,11 +178,11 @@ jobs:
       matrix:
         include:
           - platform: windows
-            arch: amd64v3
+            arch: amd64
             os: windows-latest
             goos: windows
             goarch: amd64
-            goamd64: v3
+            goamd64: v1
             binary: sing-box.exe
             variant: purego
             naive: true
@@ -366,7 +366,7 @@ jobs:
       matrix:
         include:
           - platform: windows
-            arch: amd64v3
+            arch: amd64
             os: windows-latest
             upx_asset: win64.zip
           - platform: android
